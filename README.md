@@ -72,6 +72,6 @@ Local file operations and native controls run on the current computer. Requests 
 3. Add an explicit confirmation policy in `DANGEROUS_TOOLS` when the action can modify, share, or delete data.
 4. Add unit coverage under `test/`.
 
-## GitHub Actions
+## Packaging
 
-Pushing to `main` runs tests and builds platform artifacts. GitHub Actions cannot produce a macOS artifact from a Linux runner without a macOS runner, so the workflow uses a matrix and leaves the macOS job available for a macOS runner. A tagged release produces downloadable artifacts in the workflow run.
+Build on the target operating system with `npm run dist`. Electron Builder writes the installer or portable artifact to `dist/`. The project is also ready for a GitHub Actions workflow; if you enable Actions in your fork, use the commands above in Linux, Windows, and macOS jobs so each platform is packaged on its native runner.
