@@ -1,0 +1,51 @@
+{
+  "name": "jarvis-desktop-agent",
+  "version": "0.1.0",
+  "description": "A cross-platform desktop voice agent with model-backed planning and permissioned computer control.",
+  "main": "electron/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "test": "node --test test/*.test.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "ai.jarvis.desktop",
+    "productName": "Jarvis Desktop",
+    "files": [
+      "electron/**/*",
+      "src/**/*",
+      "package.json",
+      ".env.example",
+      "README.md"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
+  },
+  "devDependencies": {
+    "electron": "^38.1.0",
+    "electron-builder": "^26.0.12"
+  }
+}
