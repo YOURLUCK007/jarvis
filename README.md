@@ -37,6 +37,10 @@ npm run dist
 
 The resulting installer or portable artifact is written to `dist/`.
 
+### Windows auto-start
+
+After `npm install` works, double-click `install-autostart.bat` in the project folder. It creates a shortcut in the current Windows user's Startup folder. Jarvis will open automatically when that user signs in. To remove auto-start, delete `Jarvis Desktop.lnk` from `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`.
+
 ## Configure an AI model
 
 Open **Settings** inside the app and enter an OpenAI-compatible base URL, model name, and API key. Or create a local `.env` based on `.env.example` before starting the app. The app never needs a model key for the built-in local planner.
