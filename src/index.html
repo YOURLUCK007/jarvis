@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' http: https:;" />
+    <title>Jarvis Desktop</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand"><div class="brand-mark">J</div><div><strong>JARVIS</strong><span>DESKTOP AGENT</span></div></div>
+        <div class="system-card"><span class="pulse"></span><div><b>Local control online</b><small>Permissioned execution</small></div></div>
+        <nav>
+          <button class="nav-item active" data-panel="conversation"><span>◉</span>Conversation</button>
+          <button class="nav-item" data-panel="activity"><span>≋</span>Activity log</button>
+          <button class="nav-item" data-panel="diagnostics"><span>⌁</span>Diagnostics</button>
+          <button class="nav-item" data-panel="settings"><span>⚙</span>Settings</button>
+        </nav>
+        <div class="sidebar-footer"><div class="permission-row"><span class="tiny-dot green"></span>Filesystem access<span class="check">✓</span></div><div class="permission-row"><span class="tiny-dot amber"></span>Model provider<span id="modelState">Not configured</span></div></div>
+      </aside>
+      <main class="main">
+        <header class="topbar"><div><span class="eyebrow">COMMAND CENTER</span><h1>What should I take care of?</h1></div><div class="top-actions"><button class="icon-btn" id="diagnosticsBtn" title="Run diagnostics">⌁</button><button class="avatar">K</button></div></header>
+        <section id="conversationPanel" class="panel active-panel">
+          <div id="conversation" class="conversation">
+            <div class="welcome"><div class="orb"><div class="orb-core"></div></div><p class="welcome-kicker">READY WHEN YOU ARE</p><h2>Speak naturally.<br /><em>I’ll work out the steps.</em></h2><p class="welcome-copy">Try a local action, a web task, or a multi-step request. I’ll show you what I’m doing and ask before anything sensitive.</p><div class="suggestions"><button data-prompt="Open my Downloads folder">Open Downloads</button><button data-prompt="Take a screenshot">Take a screenshot</button><button data-prompt="Search the web for today's weather">Search the web</button></div></div>
+          </div>
+          <div id="confirmation" class="confirmation hidden"></div>
+          <div class="composer-wrap"><div id="stage" class="stage"><span class="stage-dot"></span><span id="stageText">Standing by</span></div><form id="composer" class="composer"><textarea id="input" rows="1" placeholder="Tell Jarvis what to do…"></textarea><div class="composer-actions"><span class="shortcut">Enter to send · Shift+Enter for a new line</span><button type="button" class="stop-btn hidden" id="stopBtn">Stop</button><button type="button" class="mic-btn" id="micBtn"><span>◉</span></button><button class="send-btn" type="submit">Send <span>↗</span></button></div></form></div>
+        </section>
+        <section id="activityPanel" class="panel"><div class="section-heading"><div><span class="eyebrow">OBSERVABILITY</span><h2>Activity log</h2></div><button class="ghost-btn" id="clearLog">Clear log</button></div><div id="activityLog" class="activity-log"></div></section>
+        <section id="diagnosticsPanel" class="panel"><div class="section-heading"><div><span class="eyebrow">SYSTEM CHECK</span><h2>Diagnostics</h2></div><button class="primary-small" id="runDiagnostics">Run checks</button></div><p class="muted">A live check of the desktop capabilities Jarvis relies on. Model, microphone, and screen-capture permissions are reported separately by the operating system.</p><div id="diagnostics" class="diagnostics-grid"></div></section>
+        <section id="settingsPanel" class="panel"><div class="section-heading"><div><span class="eyebrow">CONFIGURATION</span><h2>Settings</h2></div><button class="primary-small" id="saveSettings">Save settings</button></div><div class="settings-grid"><label>Model base URL<input id="modelBaseUrl" placeholder="https://api.openai.com/v1" /></label><label>Model name<input id="modelName" placeholder="gpt-4o-mini" /></label><label class="wide">Model API key<input id="modelApiKey" type="password" placeholder="Stored only in the local app settings" /></label><label class="toggle wide"><input id="modelEnabled" type="checkbox" checked /><span class="toggle-track"></span><span>Use model planner when configured</span></label><label class="toggle wide"><input id="speakResponses" type="checkbox" checked /><span class="toggle-track"></span><span>Speak responses aloud</span></label></div><div class="privacy-note"><b>Privacy by design</b><p>Local file and computer actions run on this device. Nothing is uploaded unless you configure a model provider or explicitly use a web action.</p></div></section>
+      </main>
+    </div>
+    <script src="./app.js"></script>
+  </body>
+</html>
