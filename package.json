@@ -2,6 +2,11 @@
   "name": "jarvis-desktop-agent",
   "version": "0.1.0",
   "description": "A cross-platform desktop voice agent with model-backed planning and permissioned computer control.",
+  "author": {
+    "name": "Jarvis Contributors",
+    "email": "jarvis@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/YOURLUCK007/jarvis",
   "main": "electron/main.js",
   "type": "commonjs",
   "scripts": {
