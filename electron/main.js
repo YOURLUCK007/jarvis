@@ -1,7 +1,22 @@
 const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
+const fsSync = require("node:fs");
 const os = require("node:os");
+
+function loadDotEnv() {
+  try {
+    const content = fsSync.readFileSync(path.join(process.cwd(), ".env"), "utf8");
+    for (const line of content.split(/\r?\n/)) {
+      const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+      if (match && !process.env[match[1]]) process.env[match[1]] = match[2].replace(/^["']|["']$/g, "");
+    }
+  } catch {
+    // Settings entered in the app take precedence when .env is absent.
+  }
+}
+
+loadDotEnv();
 const { planRequest } = require("../src/core/planner");
 const { executePlan, getDiagnostics } = require("../src/core/executor");
 
