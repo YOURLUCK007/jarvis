@@ -55,6 +55,29 @@ async function openApp(name) {
   return `Opened ${name}.`;
 }
 
+async function closeApp(name) {
+  const target = String(name || "").trim();
+  if (!target) throw new Error("No application name was provided.");
+  if (process.platform === "darwin") {
+    await execFileAsync("osascript", ["-e", `tell application "${target.replace(/"/g, '\\"')}" to quit`]);
+  } else if (process.platform === "win32") {
+    await execFileAsync("taskkill", ["/IM", target.endsWith(".exe") ? target : `${target}.exe`, "/T", "/F"]);
+  } else {
+    await execFileAsync("pkill", ["-f", target]);
+  }
+  return `Closed ${target}.`;
+}
+
+async function listDirectory(directory) {
+  const target = resolveUserPath(directory || HOME);
+  const entries = await fs.readdir(target, { withFileTypes: true });
+  return entries.slice(0, 200).map((entry) => ({
+    path: path.join(target, entry.name),
+    name: entry.name,
+    type: entry.isDirectory() ? "folder" : "file"
+  }));
+}
+
 async function searchFiles(query, root) {
   const base = resolveUserPath(root || HOME);
   const wanted = String(query || "").toLowerCase();
@@ -79,6 +102,90 @@ async function searchFiles(query, root) {
   return matches;
 }
 
+async function searchWeb(query) {
+  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query || "")}`;
+  const response = await fetch(url, { headers: { "User-Agent": "Jarvis Desktop Agent/1.0" } });
+  if (!response.ok) throw new Error(`Web search returned HTTP ${response.status}.`);
+  const html = await response.text();
+  const results = [];
+  const pattern = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let match;
+  while ((match = pattern.exec(html)) && results.length < 8) {
+    const title = match[2].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&#x27;/g, "'").trim();
+    const href = match[1].replace(/&amp;/g, "&");
+    if (title && href) results.push({ title, url: href });
+  }
+  return results;
+}
+
+async function readTextFile(filePath) {
+  const target = resolveUserPath(filePath);
+  const stat = await fs.stat(target);
+  if (!stat.isFile()) throw new Error("That path is not a file.");
+  if (stat.size > 1024 * 1024) throw new Error("That file is larger than 1 MB; I did not load it into memory.");
+  return { path: target, content: await fs.readFile(target, "utf8") };
+}
+
+async function setClipboard(text) {
+  if (process.platform === "darwin") await execFileWithInput("pbcopy", [], String(text || ""));
+  else if (process.platform === "win32") await execFileWithInput("powershell", ["-NoProfile", "-Command", "Set-Clipboard"], String(text || ""));
+  else {
+    try { await execFileWithInput("wl-copy", [], String(text || "")); }
+    catch { await execFileWithInput("xclip", ["-selection", "clipboard"], String(text || "")); }
+  }
+}
+
+function execFileWithInput(command, args, input) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (code) => code === 0 ? resolve({ stdout, stderr }) : reject(Object.assign(new Error(stderr || `Command exited with ${code}`), { code })));
+    child.stdin.end(input);
+  });
+}
+
+async function getClipboard() {
+  if (process.platform === "darwin") return (await execFileAsync("pbpaste")).stdout;
+  if (process.platform === "win32") return (await execFileAsync("powershell", ["-NoProfile", "-Command", "Get-Clipboard"])).stdout;
+  try { return (await execFileAsync("wl-paste")).stdout; }
+  catch { return (await execFileAsync("xclip", ["-selection", "clipboard", "-o"])).stdout; }
+}
+
+async function typeText(text) {
+  const value = String(text || "");
+  if (process.platform === "darwin") {
+    await execFileAsync("osascript", ["-e", `tell application "System Events" to keystroke ${JSON.stringify(value)}`]);
+  } else if (process.platform === "win32") {
+    await execFileAsync("powershell", ["-NoProfile", "-Command", `$wshell = New-Object -ComObject WScript.Shell; $wshell.SendKeys(${JSON.stringify(value)})`]);
+  } else {
+    await execFileAsync("xdotool", ["type", "--clearmodifiers", value]);
+  }
+  return "Text entered.";
+}
+
+async function pressKey(key) {
+  const value = String(key || "").trim();
+  if (!value) throw new Error("No key was provided.");
+  if (process.platform === "darwin") {
+    await execFileAsync("osascript", ["-e", `tell application "System Events" to key code ${value}`]);
+  } else if (process.platform === "win32") {
+    await execFileAsync("powershell", ["-NoProfile", "-Command", `$wshell = New-Object -ComObject WScript.Shell; $wshell.SendKeys(${JSON.stringify(`{${value}}`)})`]);
+  } else {
+    await execFileAsync("xdotool", ["key", value]);
+  }
+  return `Pressed ${value}.`;
+}
+
+async function listProcesses() {
+  const command = process.platform === "win32" ? ["tasklist", ["/FO", "CSV", "/NH"]] : ["ps", ["-eo", "pid=,comm=,args="]];
+  const output = await execFileAsync(command[0], command[1]);
+  return output.stdout.split(/\r?\n/).filter(Boolean).slice(0, 150).map((line) => line.trim());
+}
+
 async function takeScreenshot() {
   const output = path.join(app.getPath("pictures"), `jarvis-${Date.now()}.png`);
   await fs.mkdir(path.dirname(output), { recursive: true });
@@ -93,20 +200,36 @@ async function takeScreenshot() {
   return { message: `Screenshot saved to ${output}.`, path: output };
 }
 
-async function executeStep(step, { signal } = {}) {
+async function executeStep(step, { signal, settings = {} } = {}) {
   if (signal?.aborted) return { ok: false, message: "Task cancelled." };
   const input = step.input || {};
+  if (settings.computerControl === false && !["respond", "calculate", "search_web", "recall_memory"].includes(step.tool)) {
+    return { ok: false, message: "Computer control is disabled in Settings." };
+  }
+  if (settings.browserAutomation === false && ["open_url", "search_web"].includes(step.tool)) {
+    return { ok: false, message: "Browser automation is disabled in Settings." };
+  }
+  if (settings.screenUnderstanding === false && ["take_screenshot", "inspect_screen"].includes(step.tool)) {
+    return { ok: false, message: "Screen understanding is disabled in Settings." };
+  }
+  if (settings.terminalAccess !== true && step.tool === "run_command") {
+    return { ok: false, message: "Terminal access is disabled in Settings." };
+  }
   switch (step.tool) {
     case "respond": return { ok: true, message: input.message || "Done." };
     case "open_url":
       await shell.openExternal(input.url);
       return { ok: true, message: `Opened ${input.url}.` };
     case "search_web": {
-      const url = `https://www.google.com/search?q=${encodeURIComponent(input.query || "")}`;
-      await shell.openExternal(url);
-      return { ok: true, message: `Opened web results for “${input.query}”.` };
+      const results = await searchWeb(input.query);
+      return {
+        ok: true,
+        message: results.length ? `Found ${results.length} current web results for “${input.query}”.` : "I couldn't find results for that search.",
+        items: results
+      };
     }
     case "open_app": return { ok: true, message: await openApp(input.name) };
+    case "close_app": return { ok: true, message: await closeApp(input.name) };
     case "open_path": {
       const target = resolveUserPath(input.path);
       const error = await shell.openPath(target);
@@ -116,6 +239,26 @@ async function executeStep(step, { signal } = {}) {
       const target = resolveUserPath(input.path);
       await fs.mkdir(target, { recursive: true });
       return { ok: true, message: `Created folder ${target}.`, path: target };
+    }
+    case "create_file": {
+      const target = resolveUserPath(input.path);
+      if (dangerousSystemPath(target)) return { ok: false, message: "That location is protected." };
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, String(input.content || ""), { flag: "wx" });
+      return { ok: true, message: `Created ${target}.`, path: target };
+    }
+    case "list_directory": {
+      const items = await listDirectory(input.path);
+      return { ok: true, message: `Found ${items.length} item${items.length === 1 ? "" : "s"}.`, items };
+    }
+    case "read_file": {
+      const file = await readTextFile(input.path);
+      return { ok: true, message: file.content || "The file is empty.", path: file.path, content: file.content };
+    }
+    case "file_info": {
+      const target = resolveUserPath(input.path);
+      const stat = await fs.stat(target);
+      return { ok: true, message: `${target} is a ${stat.isDirectory() ? "folder" : "file"} modified ${stat.mtime.toLocaleString()}.`, path: target, size: stat.size };
     }
     case "search_files": {
       const matches = await searchFiles(input.query, input.path);
@@ -143,6 +286,10 @@ async function executeStep(step, { signal } = {}) {
       return { ok: true, message: `Removed ${target}.` };
     }
     case "take_screenshot": return { ok: true, ...(await takeScreenshot()) };
+    case "inspect_screen": {
+      const shot = await takeScreenshot();
+      return { ok: true, message: `I captured the current screen at ${shot.path}. A vision-capable model can inspect this image when screen understanding is enabled.`, path: shot.path };
+    }
     case "calculate": {
       const expression = String(input.expression || "").replace(/\^/g, "**");
       if (!/^[0-9+\-*/().%\s*]+$/.test(expression) || expression.length > 120) return { ok: false, message: "That calculation contains unsupported characters." };
@@ -156,6 +303,28 @@ async function executeStep(step, { signal } = {}) {
       else return { ok: false, message: "Volume controls need a Windows adapter in this environment." };
       return { ok: true, message: `Turned volume ${input.direction === "down" ? "down" : "up"}.` };
     }
+    case "clipboard_set":
+      await setClipboard(input.text);
+      return { ok: true, message: "Clipboard updated." };
+    case "clipboard_get":
+      return { ok: true, message: await getClipboard() || "Clipboard is empty." };
+    case "type_text":
+      return { ok: true, message: await typeText(input.text) };
+    case "press_key":
+      return { ok: true, message: await pressKey(input.key) };
+    case "list_processes":
+      return { ok: true, message: "Here are the running processes.", items: await listProcesses() };
+    case "stop_process": {
+      const pid = String(input.pid || "");
+      if (!/^\d+$/.test(pid)) return { ok: false, message: "A numeric process ID is required." };
+      if (process.platform === "win32") await execFileAsync("taskkill", ["/PID", pid, "/T", "/F"]);
+      else process.kill(Number(pid), "SIGTERM");
+      return { ok: true, message: `Stopped process ${pid}.` };
+    }
+    case "remember":
+      return { ok: true, message: `I can remember that when memory is enabled: ${input.fact || "nothing was provided"}.`, memory: input.fact || "" };
+    case "recall_memory":
+      return { ok: true, message: "Memory lookup is handled by the local conversation store." };
     case "run_command": {
       const result = await execFileAsync(process.platform === "win32" ? "cmd" : "sh", process.platform === "win32" ? ["/c", input.command] : ["-lc", input.command], { timeout: 30000, maxBuffer: 1024 * 1024 });
       return { ok: true, message: result.stdout || result.stderr || "Command completed.", output: `${result.stdout || ""}${result.stderr || ""}`.trim() };
@@ -164,23 +333,30 @@ async function executeStep(step, { signal } = {}) {
   }
 }
 
-async function executePlan(plan, { signal, emit: notify } = {}) {
+async function executePlan(plan, { signal, emit: notify, settings = {} } = {}) {
   const results = [];
   for (let index = 0; index < plan.steps.length; index++) {
     if (signal?.aborted) break;
     const step = plan.steps[index];
+    notify?.("assistant:activity", { type: "ACTION", text: `${step.tool.replaceAll("_", " ")}${step.reason ? ` — ${step.reason}` : ""}` });
     notify?.("assistant:stage", { stage: "processing", label: step.reason || `Running ${step.tool.replaceAll("_", " ")}` });
     try {
-      results.push({ tool: step.tool, ...await executeStep(step, { signal }) });
+      const result = await executeStep(step, { signal, settings });
+      results.push({ tool: step.tool, ...result });
+      notify?.("assistant:activity", { type: result.ok ? "VERIFICATION" : "ERROR", text: result.message });
     } catch (error) {
-      results.push({ tool: step.tool, ok: false, message: error.code === "ENOENT" ? `I couldn’t find ${step.input?.path || step.input?.name || "that item"}.` : error.message });
+      const message = error.code === "ENOENT" ? `I couldn’t find ${step.input?.path || step.input?.name || "that item"}.` : error.message;
+      results.push({ tool: step.tool, ok: false, message });
+      notify?.("assistant:activity", { type: "ERROR", text: message });
     }
   }
-  notify?.("assistant:stage", { stage: "complete", label: results.every((item) => item.ok) ? "Complete" : "Completed with an error" });
+  const complete = results.every((item) => item.ok);
+  notify?.("assistant:activity", { type: complete ? "COMPLETE" : "ERROR", text: complete ? "Task completed successfully." : "Task completed with an error." });
+  notify?.("assistant:stage", { stage: "complete", label: complete ? "Complete" : "Completed with an error" });
   return results;
 }
 
-async function getDiagnostics() {
+async function getDiagnostics(settings = {}) {
   const checks = [];
   const check = async (name, fn, detail) => {
     try { await fn(); checks.push({ name, ok: true, detail }); }
@@ -192,9 +368,26 @@ async function getDiagnostics() {
   await check("Internet", () => new Promise((resolve, reject) => {
     require("node:https").get("https://example.com", (response) => response.statusCode < 500 ? resolve() : reject(new Error(`HTTP ${response.statusCode}`))).on("error", reject).setTimeout(5000, () => reject(new Error("Timed out")));
   }), "example.com reachable");
-  await check("Model provider", async () => { if (!process.env.MODEL_API_KEY) throw new Error("Not configured; local planner remains available."); }, process.env.MODEL_NAME || "not configured");
-  await check("Shell access", () => execFileAsync(process.platform === "win32" ? "cmd" : "sh", process.platform === "win32" ? ["/c", "echo ok"] : ["-lc", "echo ok"]), "command execution available");
+  await check("Model provider", async () => {
+    if (!settings.modelApiKey) throw new Error("Not configured; local planner remains available.");
+  }, settings.modelName || process.env.MODEL_NAME || "not configured");
+  await check("API key", async () => { if (!settings.modelApiKey && !process.env.MODEL_API_KEY) throw new Error("No key stored."); }, settings.modelApiKey ? "Stored in secure local storage" : "Not configured");
+  await check("Screen capture", async () => {
+    const probe = path.join(app.getPath("temp"), "jarvis-diagnostic.png");
+    if (process.platform === "darwin") await execFileAsync("screencapture", ["-x", probe]);
+    else if (process.platform === "win32") await execFileAsync("powershell", ["-NoProfile", "-Command", "Add-Type -AssemblyName System.Windows.Forms"]);
+    else {
+      try { await execFileAsync("gnome-screenshot", ["-f", probe]); }
+      catch { await execFileAsync("scrot", [probe]); }
+    }
+    await fs.rm(probe, { force: true });
+  }, "Native screen capture adapter");
+  await check("Browser control", () => shell.openExternal("about:blank"), "Can open the default browser");
+  await check("Terminal", () => execFileAsync(process.platform === "win32" ? "cmd" : "sh", process.platform === "win32" ? ["/c", "echo ok"] : ["-lc", "echo ok"]), "Command execution available");
+  await check("Required dependencies", async () => {
+    if (!process.versions.electron) throw new Error("Electron runtime unavailable.");
+  }, `Electron ${process.versions.electron}`);
   return { platform: process.platform, checks };
 }
 
-module.exports = { executePlan, getDiagnostics, resolveUserPath, dangerousSystemPath, searchFiles };
+module.exports = { executePlan, getDiagnostics, resolveUserPath, dangerousSystemPath, searchFiles, searchWeb, executeStep };

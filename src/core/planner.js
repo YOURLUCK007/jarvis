@@ -1,18 +1,34 @@
 const { modelPlan } = require("./model");
 
-const DANGEROUS_TOOLS = new Set(["delete_file", "run_command", "move_file", "copy_file", "rename_file"]);
+const DANGEROUS_TOOLS = new Set([
+  "delete_file",
+  "run_command",
+  "move_file",
+  "copy_file",
+  "rename_file",
+  "create_file",
+  "type_text",
+  "press_key",
+  "clipboard_set",
+  "stop_process"
+]);
 
-function cleanPlan(plan, originalText) {
+function cleanPlan(plan, originalText, settings = {}) {
   if (!plan || !Array.isArray(plan.steps)) return null;
   const steps = plan.steps
     .filter((step) => step && typeof step.tool === "string")
     .map((step) => ({ tool: step.tool, input: step.input || {}, reason: step.reason || "" }));
   if (!steps.length) return null;
+  const confirmationMode = settings.confirmationMode || "balanced";
+  const safeTools = new Set(["open_url", "search_web", "open_app", "open_path", "search_files", "list_directory", "read_file", "file_info", "calculate", "take_screenshot", "inspect_screen", "system_volume", "clipboard_get", "list_processes", "respond", "recall_memory"]);
+  const requiresConfirmation = confirmationMode === "safe"
+    ? steps.some((step) => !safeTools.has(step.tool))
+    : steps.some((step) => DANGEROUS_TOOLS.has(step.tool));
   return {
     type: "plan",
     summary: plan.summary || `Working on: ${originalText}`,
     steps,
-    requiresConfirmation: steps.some((step) => DANGEROUS_TOOLS.has(step.tool))
+    requiresConfirmation
   };
 }
 
@@ -35,6 +51,9 @@ function fallbackPlan(text) {
   if ((match = original.match(/(?:search(?: the web)?|look up|find online)\s+(?:for\s+)?(.+)/i))) {
     return cleanPlan({ summary: `Searching the web for “${match[1]}”`, steps: [{ tool: "search_web", input: { query: match[1] } }] }, original);
   }
+  if ((match = original.match(/(?:what(?:'s| is)|tell me|check)\s+(?:the\s+)?(?:latest|current|today'?s?)\s+(.+)/i))) {
+    return cleanPlan({ summary: `Checking current information about ${match[1]}`, steps: [{ tool: "search_web", input: { query: match[1] } }] }, original);
+  }
   if ((match = original.match(/(?:open|launch|start)\s+(?:my\s+)?(.+?)(?:\s+app)?$/i))) {
     return cleanPlan({ summary: `Opening ${match[1]}`, steps: [{ tool: "open_app", input: { name: match[1].trim() } }] }, original);
   }
@@ -43,6 +62,9 @@ function fallbackPlan(text) {
   }
   if ((match = original.match(/(?:create|make)\s+(?:a\s+)?folder\s+(?:called|named)?\s*["']?(.+?)["']?$/i))) {
     return cleanPlan({ summary: `Creating folder ${match[1]}`, steps: [{ tool: "create_folder", input: { path: match[1].trim() } }] }, original);
+  }
+  if ((match = original.match(/(?:create|make|write)\s+(?:a\s+)?file\s+(?:called|named)?\s*["']?(.+?)["']?(?:\s+with\s+(.+))?$/i))) {
+    return cleanPlan({ summary: `Creating file ${match[1]}`, steps: [{ tool: "create_file", input: { path: match[1].trim(), content: match[2] || "" } }] }, original);
   }
   if (/(?:take|capture).*(?:screenshot|screen shot)|screenshot/i.test(lower)) {
     return cleanPlan({ summary: "Capturing the current screen", steps: [{ tool: "take_screenshot", input: {} }] }, original);
@@ -57,6 +79,9 @@ function fallbackPlan(text) {
   if ((match = original.match(/(?:find|search for)\s+(?:the\s+)?(?:file|files)?\s*(?:called|named)?\s*["']?(.+?)["']?(?:\s+in\s+(.+))?$/i))) {
     return cleanPlan({ summary: `Finding files matching ${match[1]}`, steps: [{ tool: "search_files", input: { query: match[1].trim(), path: match[2]?.trim() } }] }, original);
   }
+  if ((match = original.match(/(?:open|show|list)\s+(?:the\s+)?(?:contents of\s+)?(.+?)\s+folder$/i))) {
+    return cleanPlan({ summary: `Listing ${match[1]}`, steps: [{ tool: "list_directory", input: { path: match[1].trim() } }] }, original);
+  }
   if ((match = original.match(/(?:delete|remove|erase)\s+(.+)/i))) {
     return cleanPlan({ summary: `Removing ${match[1]}`, steps: [{ tool: "delete_file", input: { path: match[1].trim() } }] }, original);
   }
@@ -69,7 +94,7 @@ function fallbackPlan(text) {
 async function planRequest(text, { history = [], settings = {}, signal } = {}) {
   try {
     const remote = await modelPlan(text, history, settings, signal);
-    const normalized = cleanPlan(remote, text);
+    const normalized = cleanPlan(remote, text, settings);
     if (normalized) return normalized;
   } catch (error) {
     if (error.name === "AbortError") return { type: "cancel", summary: "Stopped", steps: [] };
